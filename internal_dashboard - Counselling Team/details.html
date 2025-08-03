@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <link rel="icon" href="my-favicon.png" type="image/png">
+    <link rel="apple-touch-icon" href="my-favicon.png">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Details</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #f4f7f6;
+            margin: 0;
+            padding: 20px;
+        }
+        .container {
+            max-width: 1400px;
+            margin: 20px auto;
+            background-color: #fff;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
+        }
+        h1 {
+            text-align: center;
+            padding: 20px 0;
+            margin: 0;
+            color: #333;
+        }
+        .actions-container {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 20px;
+            background-color: #f9f9f9;
+            border-bottom: 1px solid #ddd;
+        }
+        .pagination-container {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .pagination-btn, .export-btn {
+            padding: 8px 16px;
+            border: 1px solid #ccc;
+            background-color: #fff;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 500;
+            transition: background-color 0.2s;
+        }
+        .pagination-btn:hover, .export-btn:hover {
+            background-color: #e9e9e9;
+        }
+        .pagination-btn:disabled {
+            cursor: not-allowed;
+            opacity: 0.5;
+        }
+        #page-info {
+            font-weight: 500;
+        }
+        .export-btn {
+            background-color: #28a745;
+            color: white;
+            border-color: #28a745;
+        }
+        .table-wrapper {
+            overflow-x: auto;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        th, td {
+            padding: 10px 15px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+            font-size: 14px;
+            white-space: nowrap; /* Prevents text wrapping */
+        }
+        thead th {
+            background-color: #333;
+            color: #fff;
+            font-weight: 600;
+            position: sticky; /* Makes header sticky during scroll */
+            top: 0;
+        }
+        tbody tr:nth-child(even) {
+            background-color: #f9f9f9;
+        }
+        tbody tr:hover {
+            background-color: #f1f1f1;
+        }
+        #no-data-message {
+            text-align: center;
+            padding: 50px;
+            font-size: 1.2em;
+            color: #888;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h1 id="page-title">Details</h1>
+        
+        <div class="actions-container" style="display: none;">
+            <button id="export-csv-btn" class="export-btn">Export All to CSV</button>
+            <div class="pagination-container">
+                <button id="prev-page-btn" class="pagination-btn">Previous</button>
+                <span id="page-info"></span>
+                <button id="next-page-btn" class="pagination-btn">Next</button>
+            </div>
+        </div>
+
+        <div class="table-wrapper">
+            <table>
+                <thead id="details-table-head"></thead>
+                <tbody id="details-table-body"></tbody>
+            </table>
+        </div>
+        <div id="no-data-message" style="display: none;">
+            <p>No data found.</p>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // --- STATE VARIABLES ---
+            let allData = [];
+            let headers = [];
+            let currentPage = 1;
+            const rowsPerPage = 50;
+
+            // --- DOM ELEMENT REFERENCES ---
+            const tableHead = document.getElementById('details-table-head');
+            const tableBody = document.getElementById('details-table-body');
+            const pageTitle = document.getElementById('page-title');
+            const exportBtn = document.getElementById('export-csv-btn');
+            const prevBtn = document.getElementById('prev-page-btn');
+            const nextBtn = document.getElementById('next-page-btn');
+            const pageInfo = document.getElementById('page-info');
+            const actionsContainer = document.querySelector('.actions-container');
+            const noDataMessage = document.getElementById('no-data-message');
+            const table = document.querySelector('table');
+
+            // --- INITIALIZATION ---
+
+            // 1. Get data from browser's temporary memory (sessionStorage)
+            const dataString = sessionStorage.getItem('detailsData');
+            const title = sessionStorage.getItem('detailsTitle') || 'Details';
+
+            // Update title elements
+            document.title = title;
+            
+            if (!dataString) {
+                pageTitle.textContent = title;
+                table.style.display = 'none';
+                noDataMessage.style.display = 'block';
+                return; // Stop if no data
+            }
+
+            allData = JSON.parse(dataString);
+
+            // Sort data by date if a date column exists
+            if (allData.length > 0) {
+                const possibleDateKeys = ['Date', 'Captured On']; 
+                const sortKey = possibleDateKeys.find(key => key in allData[0]);
+
+                if (sortKey) {
+                    allData.sort((a, b) => new Date(b[sortKey]) - new Date(a[sortKey]));
+                }
+            }
+
+            if (allData.length === 0) {
+                pageTitle.textContent = title;
+                table.style.display = 'none';
+                noDataMessage.style.display = 'block';
+                return;
+            }
+            
+            // If we have data, show the action buttons and update the title
+            actionsContainer.style.display = 'flex';
+            pageTitle.textContent = `${title} (${allData.length} Total)`;
+            
+            // Get headers from the first record and filter out payout-related columns
+            const allHeaders = Object.keys(allData[0]);
+            headers = allHeaders.filter(header => !header.toLowerCase().includes('payout'));
+
+            // --- DYNAMIC FUNCTIONS ---
+
+            function generateTableHeaders() {
+                const headerRow = tableHead.insertRow();
+                headers.forEach(headerText => {
+                    const th = document.createElement('th');
+                    th.textContent = headerText;
+                    headerRow.appendChild(th);
+                });
+            }
+
+            function displayPage(page) {
+                currentPage = page;
+                tableBody.innerHTML = ''; // Clear previous page's rows
+
+                const startIndex = (page - 1) * rowsPerPage;
+                const endIndex = startIndex + rowsPerPage;
+                const paginatedItems = allData.slice(startIndex, endIndex);
+
+                paginatedItems.forEach(item => {
+                    const row = tableBody.insertRow();
+                    headers.forEach(header => {
+                        const cell = row.insertCell();
+                        cell.textContent = item[header];
+                    });
+                });
+
+                updatePaginationControls();
+            }
+
+            function updatePaginationControls() {
+                const totalPages = Math.ceil(allData.length / rowsPerPage);
+                pageInfo.textContent = `Page ${currentPage} of ${totalPages || 1}`;
+                prevBtn.disabled = (currentPage === 1);
+                nextBtn.disabled = (currentPage === totalPages || totalPages === 0);
+            }
+
+            function exportToCsv() {
+                const csvRows = [headers.join(',')]; // Header row (already filtered)
+
+                for (const row of allData) {
+                    const values = headers.map(header => {
+                        const value = row[header] === null || row[header] === undefined ? '' : row[header];
+                        const escaped = ('' + value).replace(/"/g, '""');
+                        return `"${escaped}"`;
+                    });
+                    csvRows.push(values.join(','));
+                }
+
+                const csvString = csvRows.join('\n');
+                const blob = new Blob([csvString], { type: 'text/csv' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                
+                const today = new Date().toISOString().slice(0, 10);
+                const safeTitle = title.replace(/\s+/g, '_').toLowerCase();
+                a.href = url;
+                a.download = `${safeTitle}_export_${today}.csv`;
+                a.click();
+                URL.revokeObjectURL(url);
+            }
+            
+            // --- EVENT LISTENERS ---
+            prevBtn.addEventListener('click', () => displayPage(currentPage - 1));
+            nextBtn.addEventListener('click', () => displayPage(currentPage + 1));
+            exportBtn.addEventListener('click', exportToCsv);
+
+            // --- KICK IT OFF ---
+            generateTableHeaders();
+            displayPage(1); // Display the first page initially
+
+        });
+    </script>
+
+</body>
+</html>
